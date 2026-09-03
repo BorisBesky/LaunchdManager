@@ -20,7 +20,7 @@ final class LaunchdController: ObservableObject {
     @Published var selection = Set<String>()
     @Published var searchText = ""
     @Published var category: CategoryFilter? = .all
-    @Published var showOnlyRunning = false
+    @Published var statusFilter: JobRunState? = nil
     @Published var lastMessage: String?
     @Published var lastError: String?
     @Published var runtimeInfo: [String: String] = [:]

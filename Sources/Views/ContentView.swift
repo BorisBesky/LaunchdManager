@@ -105,11 +105,24 @@ struct ContentView: View {
             .help("Actions for the selected jobs")
         }
         ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: $controller.showOnlyRunning) {
-                Label("Running Only", systemImage: "line.3.horizontal.decrease.circle")
+            Menu {
+                Picker("Status", selection: $controller.statusFilter) {
+                    Text("All Statuses").tag(nil as JobRunState?)
+                    ForEach(JobRunState.allCases, id: \.self) { state in
+                        Label(state.filterLabel, systemImage: state.filterIcon)
+                            .tag(state as JobRunState?)
+                    }
+                }
+            } label: {
+                Label(
+                    controller.statusFilter?.filterLabel ?? "Filter by Status",
+                    systemImage: controller.statusFilter == nil
+                        ? "line.3.horizontal.decrease.circle"
+                        : "line.3.horizontal.decrease.circle.fill"
+                )
             }
-            .toggleStyle(.button)
-            .help("Show only running jobs")
+            .help(controller.statusFilter.map { "Showing \($0.filterLabel.lowercased()) jobs" }
+                ?? "Filter by status")
         }
         ToolbarItem(placement: .primaryAction) {
             Button { controller.refresh() } label: {

@@ -40,11 +40,30 @@ enum CategoryFilter: Hashable {
     case domain(ServiceDomain)
 }
 
-enum JobRunState {
+enum JobRunState: CaseIterable {
     case running
     case failed    // loaded, not running, last exit != 0
     case stopped   // loaded, not running
     case notLoaded
+
+    /// Label matching the status column text.
+    var filterLabel: String {
+        switch self {
+        case .running: return "Running"
+        case .failed: return "Failed"
+        case .stopped: return "Loaded"
+        case .notLoaded: return "Not loaded"
+        }
+    }
+
+    var filterIcon: String {
+        switch self {
+        case .running: return "play.circle"
+        case .failed: return "xmark.circle"
+        case .stopped: return "pause.circle"
+        case .notLoaded: return "minus.circle"
+        }
+    }
 }
 
 struct LaunchdService: Identifiable, Hashable {
@@ -58,8 +77,37 @@ struct LaunchdService: Identifiable, Hashable {
 
     var id: String { label }
 
-    static func == (lhs: LaunchdService, rhs: LaunchdService) -> Bool { lhs.id == rhs.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    /// NOTE: equality covers every field the UI renders — pid, exit status,
+    /// disabled state, and plist content. SwiftUI's `Table` skips re-rendering
+    /// rows that compare equal, so an id-only `==` left stale status dots
+    /// after Start/Stop (the inspector re-renders unconditionally and was
+    /// already correct).
+    static func == (lhs: LaunchdService, rhs: LaunchdService) -> Bool {
+        lhs.label == rhs.label
+            && lhs.plistPath == rhs.plistPath
+            && lhs.domain == rhs.domain
+            && lhs.pid == rhs.pid
+            && lhs.lastExitStatus == rhs.lastExitStatus
+            && lhs.disabledOverride == rhs.disabledOverride
+            && NSDictionary(dictionary: lhs.plist).isEqual(to: rhs.plist)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(label)
+        hasher.combine(plistPath)
+        hasher.combine(domain)
+        hasher.combine(pid)
+        hasher.combine(lastExitStatus)
+        hasher.combine(disabledOverride)
+        hasher.combine(Self.plistFingerprint(plist))
+    }
+
+    /// Deterministic content fingerprint (Apple's XML serializer emits
+    /// dictionary keys in sorted order). A pure function of content, so equal
+    /// plists always fingerprint equal — keeping `hash` consistent with `==`.
+    private static func plistFingerprint(_ plist: [String: Any]) -> Data {
+        (try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)) ?? Data()
+    }
 
     // MARK: - plist accessors
 

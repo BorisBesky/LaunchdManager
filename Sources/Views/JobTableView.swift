@@ -34,8 +34,8 @@ struct JobTableView: View {
         if let category = controller.category, case .domain(let domain) = category {
             result = result.filter { $0.domain == domain }
         }
-        if controller.showOnlyRunning {
-            result = result.filter { $0.pid != nil }
+        if let status = controller.statusFilter {
+            result = result.filter { $0.runState == status }
         }
         if !controller.searchText.isEmpty {
             result = result.filter {

@@ -17,6 +17,7 @@ swiftc -O -swift-version 5 \
     $(find Sources -name '*.swift' | sort)
 
 cp Resources/Info.plist "$APP_DIR/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP_DIR/Contents/Resources/"
 
 echo "Built $APP_DIR"
 echo "Run with: open $APP_DIR"

@@ -4,6 +4,16 @@ A native macOS app for browsing and managing `launchd` jobs — LaunchAgents and
 LaunchDaemons — inspired by LaunchControl. Built with SwiftUI, distributed as a
 plain `.app` bundle compiled with `swiftc` (no Xcode project required).
 
+## Screenshots
+
+Main window — browse domains, live status, and job details:
+
+![LaunchdManager main window](docs/screenshots/main-window.png)
+
+Job editor — create or edit a LaunchAgent/Daemon plist:
+
+![LaunchdManager job editor](docs/screenshots/job-editor.png)
+
 ## Features
 
 **Browse all launchd domains**

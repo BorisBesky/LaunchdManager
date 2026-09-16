@@ -1,0 +1,162 @@
+name: "Build LaunchdManager"
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+  workflow_dispatch:
+    inputs:
+      tagName:
+        description: 'Git tag for the release (e.g. v1.0.0)'
+        required: true
+      releaseName:
+        description: 'Name of the release'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  publish-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG_NAME="${{ github.ref_name }}"
+            VERSION="${TAG_NAME#v}"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+            echo "Extracted version: $VERSION from tag: $TAG_NAME"
+          else
+            TAG_INPUT="${{ github.event.inputs.tagName }}"
+            VERSION="${TAG_INPUT#v}"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+            echo "Extracted version: $VERSION from input: $TAG_INPUT"
+          fi
+
+      - name: Update Info.plist version
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" Resources/Info.plist
+          echo "Updated Resources/Info.plist to $VERSION"
+          plutil -p Resources/Info.plist
+
+      # ----- Prepare macOS signing keychain (mirrors file-organizer-desktop) -----
+      - name: Prepare macOS signing keychain
+        shell: bash
+        env:
+          APPLE_CERT_BASE64: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: launchdmanager-build
+        run: |
+          set -euo pipefail
+          mkdir -p build-logs
+
+          KEYCHAIN_PATH="$HOME/Library/Keychains/launchdmanager-build.keychain-db"
+          CERT_P12_TMP="$(mktemp -t lm-cert-XXXX).p12"
+
+          echo "$APPLE_CERT_BASE64" | base64 --decode > "$CERT_P12_TMP"
+          ls -l "$CERT_P12_TMP"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN_PATH"
+
+          security import "$CERT_P12_TMP" -k "$KEYCHAIN_PATH" -P "$APPLE_CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/pkgbuild -T /usr/bin/productbuild
+
+          security list-keychains -d user -s "$HOME/Library/Keychains/login.keychain-db" "$KEYCHAIN_PATH" \
+            | tee build-logs/security-list-keychains.log
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" \
+            2>&1
+
+          security find-identity -v -p codesigning | tee build-logs/security-find-identity.log
+
+          APPLE_SIGNING_IDENTITY=$(security find-identity -v -p codesigning | awk -F\" 'NR==1{print $2}')
+          echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          echo "Chosen identity: $APPLE_SIGNING_IDENTITY" | tee build-logs/identity-chosen.log
+
+          ln -sf "$KEYCHAIN_PATH" launchdmanager-build.keychain
+          ls -l launchdmanager-build.keychain >> build-logs/ln-symlink.log
+
+      - name: Build universal app
+        run: |
+          chmod +x ./build.sh
+          ./build.sh universal
+
+      - name: Codesign app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="LaunchdManager.app"
+          IDENTITY="${APPLE_SIGNING_IDENTITY:?APPLE_SIGNING_IDENTITY is empty}"
+
+          codesign --force --deep --options runtime \
+            --sign "$IDENTITY" \
+            --timestamp \
+            "$APP"
+
+          codesign --verify --deep --strict --verbose=2 "$APP" | tee build-logs/codesign-verify.log
+          spctl --assess --type execute --verbose=4 "$APP" 2>&1 | tee build-logs/spctl-assess.log || true
+
+      - name: Notarize and staple
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          APP="LaunchdManager.app"
+          ZIP="LaunchdManager-notarize.zip"
+
+          # Notarytool wants a zip/dmg/pkg; zip the signed app, submit, then staple the .app
+          ditto -c -k --keepParent "$APP" "$ZIP"
+
+          xcrun notarytool submit "$ZIP" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait | tee build-logs/notarytool.log
+
+          xcrun stapler staple "$APP" | tee build-logs/stapler.log
+          xcrun stapler validate "$APP" | tee build-logs/stapler-validate.log
+
+          rm -f "$ZIP"
+
+      - name: Package release zip
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          OUT="LaunchdManager-macos-universal-v${VERSION}.zip"
+          ditto -c -k --keepParent LaunchdManager.app "$OUT"
+          echo "asset=$OUT" >> "$GITHUB_OUTPUT"
+          ls -lh "$OUT"
+          lipo -info LaunchdManager.app/Contents/MacOS/LaunchdManager
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ github.event.inputs.releaseName || format('LaunchdManager v{0}', steps.version.outputs.version) }}
+          files: ${{ steps.package.outputs.asset }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

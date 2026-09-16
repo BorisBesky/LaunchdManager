@@ -126,6 +126,26 @@ Sources/
 - Complex `KeepAlive` dictionaries and array-form `StartCalendarInterval`
   values are preserved but editable only in the Raw XML tab.
 
+## Release builds (CI)
+
+Signed universal macOS releases are built on GitHub Actions (`.github/workflows/build.yml`).
+
+- **Trigger:** push a tag `v*` (e.g. `v1.0.0`), or run the workflow manually from the Actions tab.
+- **Artifact:** `LaunchdManager-macos-universal-vX.Y.Z.zip` (arm64 + x86_64), Developer ID signed and notarized.
+- **Local unsigned build:** `./build.sh` (native arch) or `./build.sh universal`.
+
+Required repository secrets (same names as [file-organizer-desktop](https://github.com/BorisBesky/file-organizer-desktop)):
+
+| Secret | Purpose |
+| --- | --- |
+| `APPLE_CERTIFICATE` | Base64-encoded Developer ID Application `.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | Password for that `.p12` |
+| `APPLE_ID` | Apple ID used for notarization |
+| `APPLE_PASSWORD` | App-specific password for notarization |
+| `APPLE_TEAM_ID` | Apple Developer Team ID |
+
+Copy these from the File Organizer Desktop repo settings before cutting a release.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
